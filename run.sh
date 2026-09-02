@@ -71,6 +71,7 @@ cp "$SCRIPT_DIR/src/carddemo-interest.cob" "$INPUTS/"
 cp "$SCRIPT_DIR/src/carddemo-interest.rs" "$INPUTS/"
 cp "$FIXTURES" "$INPUTS/"
 cp "$SCRIPT_DIR/PROVENANCE.md" "$INPUTS/"
+cp "$SCRIPT_DIR/LICENSE" "$INPUTS/LICENSE.mirepoix-bsl-1.1"
 cp "$SCRIPT_DIR/upstream/LICENSE" "$INPUTS/LICENSE.carddemo-apache-2.0"
 cp "$SCRIPT_DIR/upstream/NOTICE" "$INPUTS/NOTICE.carddemo"
 
@@ -97,6 +98,7 @@ printf 'caseId\tcategory\toracleExit\tmutantExit\toracleOutput\tmutantOutput\tve
 case_count=0
 baseline_failed=0
 mutation_differences=0
+mutation_error_differences=0
 valid_case_count=0
 
 run_case() {
@@ -140,7 +142,11 @@ while IFS=$'\t' read -r case_id category balance rate expected_exit expected_tag
   mutation_verdict=SAME
   if [[ "$mutant_exit" != "$oracle_exit" || "$mutant_output" != "$oracle_output" ]]; then
     mutation_verdict=DIFFERENT
-    mutation_differences=$((mutation_differences + 1))
+    if [[ "$expected_exit" == "0" ]]; then
+      mutation_differences=$((mutation_differences + 1))
+    else
+      mutation_error_differences=$((mutation_error_differences + 1))
+    fi
   fi
   if [[ -s "$mutant_stderr" ]]; then
     echo "ERROR: mutant wrote stderr for case $case_id" >&2
@@ -163,7 +169,8 @@ done <"$FIXTURES"
 baseline_verdict=DIVERGENT
 [[ "$baseline_failed" -eq 0 ]] && baseline_verdict=EQUIVALENT
 mutation_verdict=NOT_DETECTED
-[[ "$mutation_differences" -eq "$valid_case_count" && "$valid_case_count" -gt 0 ]] \
+[[ "$mutation_differences" -eq "$valid_case_count" && "$valid_case_count" -gt 0 \
+   && "$mutation_error_differences" -eq 0 ]] \
   && mutation_verdict=DIVERGENT
 
 env BASELINE_VERDICT="$baseline_verdict" \
@@ -173,6 +180,7 @@ env BASELINE_VERDICT="$baseline_verdict" \
   CASE_COUNT="$case_count" \
   BASELINE_FAILED="$baseline_failed" \
   MUTATION_DIFFERENCES="$mutation_differences" \
+  MUTATION_ERROR_DIFFERENCES="$mutation_error_differences" \
   VALID_CASE_COUNT="$valid_case_count" \
   MODE="$MODE" \
   python3 - <<'PY' >"$OUTPUT/result.json"
@@ -182,7 +190,7 @@ import os
 baseline = os.environ["BASELINE_VERDICT"]
 mutation = os.environ["MUTATION_VERDICT"]
 mode = os.environ["MODE"]
-overall = "PASS" if mutation == "DIVERGENT" and (mode == "mutation" or baseline == "EQUIVALENT") else "FAIL"
+overall = "PASS" if mutation == "DIVERGENT" and baseline == "EQUIVALENT" else "FAIL"
 print(json.dumps({
     "schemaVersion": 1,
     "claim": os.environ["CLAIM"],
@@ -201,6 +209,7 @@ print(json.dumps({
         "verdict": mutation,
         "validCases": int(os.environ["VALID_CASE_COUNT"]),
         "differingCases": int(os.environ["MUTATION_DIFFERENCES"]),
+        "errorCasesDiffering": int(os.environ["MUTATION_ERROR_DIFFERENCES"]),
     },
     "overall": overall,
 }, indent=2, sort_keys=True))
@@ -230,6 +239,6 @@ echo "bundle=$bundle"
 if [[ "$mutation_verdict" != "DIVERGENT" ]]; then
   exit 1
 fi
-if [[ "$MODE" != "mutation" && "$baseline_verdict" != "EQUIVALENT" ]]; then
+if [[ "$baseline_verdict" != "EQUIVALENT" ]]; then
   exit 1
 fi

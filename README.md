@@ -65,8 +65,9 @@ compiler versions, binaries, execution tables, and the result. The adjacent
 `.tar.gz` is the portable evidence bundle. Generated evidence and binaries belong
 outside this source directory and must not be committed.
 
-`--mutation` runs controlled-mutation mode alone. It exits zero only when the
-mutant is detected and the machine-readable mutation verdict is `DIVERGENT`.
+`--mutation` selects mutation-focused terminal output. The evidence still evaluates
+the baseline, and the command exits zero only when the baseline is `EQUIVALENT` and
+the machine-readable mutation verdict is `DIVERGENT`.
 
 ## Semantics
 
@@ -92,8 +93,8 @@ reported `OK`; both implementations agree on this boundary in fixtures
 `truncated-fit-positive` and `truncated-fit-negative`.
 
 Fixtures cover zero, positive and negative signs, representable boundaries,
-fractional-cent truncation, strict malformed values, input field overflow, and
-result overflow.
+fractional-cent truncation, argument framing, mixed error precedence, strict
+malformed values, input field overflow, and result overflow.
 
 ## Provenance, licensing, and limitations
 

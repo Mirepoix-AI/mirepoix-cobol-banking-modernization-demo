@@ -16,30 +16,36 @@ enum InputError {
 }
 
 fn parse_fixed(input: &str, maximum_integral_digits: usize) -> Result<i128, InputError> {
+    // GnuCOBOL accepts ARGUMENT-VALUE into PIC X(64), then applies FUNCTION TRIM.
+    // Reproduce that byte-oriented framing before validating the decimal syntax.
+    let prefix = &input.as_bytes()[..input.len().min(64)];
+    let input = std::str::from_utf8(prefix)
+        .map_err(|_| InputError::Invalid)?
+        .trim_matches(' ');
+    if !input.is_ascii() {
+        return Err(InputError::Invalid);
+    }
     let (negative, unsigned) = match input.as_bytes().first() {
         Some(b'-') => (true, &input[1..]),
         Some(b'+') => (false, &input[1..]),
         _ => (false, input),
     };
-    let (integral, fractional) = match unsigned.split_once('.') {
-        Some(parts) => parts,
-        None => return Err(InputError::Invalid),
-    };
-    if integral.is_empty()
-        || integral.len() > maximum_integral_digits
-        || fractional.len() != 2
-        || !integral.bytes().all(|byte| byte.is_ascii_digit())
+    if unsigned.len() < 4 {
+        return Err(InputError::Invalid);
+    }
+    let decimal_position = unsigned.len() - 3;
+    if decimal_position > maximum_integral_digits {
+        return Err(InputError::Overflow);
+    }
+    if unsigned.as_bytes()[decimal_position] != b'.' {
+        return Err(InputError::Invalid);
+    }
+    let integral = &unsigned[..decimal_position];
+    let fractional = &unsigned[decimal_position + 1..];
+    if !integral.bytes().all(|byte| byte.is_ascii_digit())
         || !fractional.bytes().all(|byte| byte.is_ascii_digit())
     {
-        return if integral.len() > maximum_integral_digits
-            && integral.bytes().all(|byte| byte.is_ascii_digit())
-            && fractional.len() == 2
-            && fractional.bytes().all(|byte| byte.is_ascii_digit())
-        {
-            Err(InputError::Overflow)
-        } else {
-            Err(InputError::Invalid)
-        };
+        return Err(InputError::Invalid);
     }
     let whole = integral.parse::<i128>().map_err(|_| InputError::Overflow)?;
     let fraction = fractional
@@ -59,8 +65,17 @@ fn format_cents(cents: i128) -> String {
 }
 
 fn calculate(balance: &str, rate: &str) -> Result<i128, InputError> {
-    let balance_cents = parse_fixed(balance, 9)?;
-    let rate_hundredths = parse_fixed(rate, 4)?;
+    let balance_result = parse_fixed(balance, 9);
+    let rate_result = parse_fixed(rate, 4);
+    // The oracle validates both fields, reporting overflow ahead of malformed
+    // input when the two arguments fail with different classifications.
+    if matches!(balance_result, Err(InputError::Overflow))
+        || matches!(rate_result, Err(InputError::Overflow))
+    {
+        return Err(InputError::Overflow);
+    }
+    let balance_cents = balance_result?;
+    let rate_hundredths = rate_result?;
     let product = balance_cents
         .checked_mul(rate_hundredths)
         .ok_or(InputError::Overflow)?;
