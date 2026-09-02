@@ -1,0 +1,23 @@
+# id	category	balance	rate	expectedExit	expectedTag	expectedValue
+zero	zero	0.00	0.00	0	OK	0.00
+positive	exact	100.00	12.00	0	OK	1.00
+negative-balance	sign	-100.00	12.00	0	OK	-1.00
+negative-rate	sign	100.00	-12.00	0	OK	-1.00
+double-negative	sign	-100.00	-12.00	0	OK	1.00
+fractional-cent-positive	truncation	10.01	1.00	0	OK	0.00
+fractional-cent-negative	truncation	-10.01	1.00	0	OK	0.00
+one-cent-positive	boundary	12.00	1.00	0	OK	0.01
+one-cent-negative	boundary	-12.00	1.00	0	OK	-0.01
+positive-sign	format	+100.00	+12.00	0	OK	1.00
+leading-zeroes	format	000000001.20	0001.00	0	OK	0.00
+max-positive	boundary	999999999.99	1200.00	0	OK	999999999.99
+max-negative	boundary	-999999999.99	1200.00	0	OK	-999999999.99
+truncated-fit-positive	boundary	999991666.73	1200.01	0	OK	999999999.99
+truncated-fit-negative	boundary	-999991666.73	1200.01	0	OK	-999999999.99
+result-overflow	overflow	999999999.99	1200.01	3	ERROR	OVERFLOW
+balance-overflow	overflow	1000000000.00	1.00	3	ERROR	OVERFLOW
+rate-overflow	overflow	1.00	10000.00	3	ERROR	OVERFLOW
+malformed-alpha	malformed	abc	1.00	2	ERROR	INVALID_INPUT
+malformed-scale	malformed	1.0	1.00	2	ERROR	INVALID_INPUT
+malformed-exponent	malformed	1e2	1.00	2	ERROR	INVALID_INPUT
+malformed-sign	malformed	--1.00	1.00	2	ERROR	INVALID_INPUT
