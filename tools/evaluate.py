@@ -9,17 +9,23 @@ import subprocess
 import time
 from numeric import corpus, oracle, SEED, GENERATED
 from processes import finish
+from stateful_suite import StatefulFailure, suite
 
 MUTANTS = ['one_cent', 'rounding', 'sign', 'divisor', 'range']
 ACTIVE = None
+STOPPING = False
 
 
 def interrupted(_signum, _frame):
+    global STOPPING
+    if STOPPING:return
+    STOPPING=True
     if ACTIVE is not None:
-        finish(ACTIVE)
+        finish(ACTIVE,grace=1.3,timeout=1.8)
     raise RuntimeError('evaluation interrupted')
 
 signal.signal(signal.SIGTERM, interrupted)
+signal.signal(signal.SIGINT, interrupted)
 
 
 def execute(argv, timeout=20):
@@ -30,7 +36,7 @@ def execute(argv, timeout=20):
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        finish(process)
+        finish(process,grace=1.3,timeout=1.8)
         raise RuntimeError(f'command timed out: {argv[0]}')
     finish(process)
     ACTIVE = None
@@ -48,6 +54,11 @@ def evaluate(root, output):
         if variant != 'rust':
             command += ['--cfg','carddemo_mutation' if variant == 'one_cent' else 'mutation_'+variant]
         commands.append(command+['-o',str(build/variant),str(root/'src/carddemo-interest.rs')])
+    commands += [
+        ['cobc','-x','-free','-Wall','-o',str(build/'stateful-cobol'),str(root/'src/stateful.cob')],
+        ['rustc','--edition=2021','-D','warnings','-C','overflow-checks=yes','-C','strip=symbols',
+         '-o',str(build/'stateful-rust'),str(root/'src/stateful.rs')],
+    ]
     (output/'commands.json').write_text(json.dumps(commands, indent=2)+'\n')
     for index, command in enumerate(commands):
         result = execute(command, 90)
@@ -86,7 +97,11 @@ if __name__ == '__main__':
     result = dict(state='incomplete', startedAt=time.time())
     try:
         result.update(evaluate(args.root,args.output))
+        result['stateful']=suite(args.root,args.output,execute)
         result['state']='verified' if result['baseline']=='EQUIVALENT' and not result['survived'] else 'failed'
+    except StatefulFailure as error:
+        result.update(state='failed',stateful=dict(state='failed',
+                      failureEvidence='stateful/failing-cases.json'),error=str(error))
     except Exception as error:
         result['error']=str(error)
     result['endedAt']=time.time()

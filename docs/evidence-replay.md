@@ -65,3 +65,15 @@ compiler failure with diagnostics, input tampering refused before execution, and
 required surviving mutant that must fail. Numeric tests check hand derivations and
 reproducibility. Historical defect fixtures should never be interpreted as production
 coverage. The independent reviewer owns acceptance of these checks.
+
+### CI execution budget
+
+The expanded numeric/stateful/adverse suite runs all discovered tests in one job.
+Its job budget is 30 minutes, with separate limits of 5 minutes for toolchain setup,
+6 minutes for snapshot capture, and 20 minutes for the complete test suite. The
+remaining job budget allows evidence retention after failure. The previous 10-minute
+job limit interrupted the four-family infrastructure regression on a hosted runner.
+No tests are filtered or skipped by this adjustment. Existing per-command limits
+(including 120-second test harness calls, 300-second evaluator runs, and 3-second
+state transitions with bounded cleanup) remain unchanged. A timed-out suite is
+incomplete even when its earlier snapshot capture verified.

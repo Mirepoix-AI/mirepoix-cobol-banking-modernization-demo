@@ -11,17 +11,20 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install GnuCOBOL
+        timeout-minutes: 5
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends gnucobol
       - name: Capture and verify the snapshot
+        timeout-minutes: 6
         run: ./run.sh --output "$RUNNER_TEMP/carddemo-evidence"
       - name: Replay and exercise adverse evidence paths
+        timeout-minutes: 20
         run: python3 -B -m unittest discover -s tests -v 2>&1 | tee "$RUNNER_TEMP/evidence-tests.log"
       - name: Retain evidence, including failed or incomplete runs
         if: always()
