@@ -193,62 +193,84 @@ def transition(binary,state,record,log):
                                     stderr=stderr.decode(errors='replace')),timedOut=True)
         raise RuntimeError('transition timeout')
     finally:
-        try:finish(process)
+        try:
+            finish(process)
+            log['cleanupConfirmed']=True
         finally:ACTIVE=None;log.update(startedAt=started,endedAt=time.time())
 
 
 def publish(directory,state,fault=None,before=None,phase=lambda value:None):
     candidate=directory/'candidate.json'
     phase('write')
-    if fault=='write':raise OSError('injected pre-rename write failure')
+    if fault=='write':
+        phase('injected-write-failure')
+        raise OSError('injected pre-rename write failure')
     with candidate.open('w') as stream:
         stream.write(canonical(state)+'\n');stream.flush();os.fsync(stream.fileno())
     phase('before-rename')
     if before:before()
     os.replace(candidate,directory/'checkpoint.json')
     phase('renamed-directory-sync-pending')
-    if fault=='dirsync':raise OSError('injected directory-fsync failure after rename')
+    if fault=='dirsync':
+        phase('injected-directory-sync-failure')
+        raise OSError('injected directory-fsync failure after rename')
     fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY)
     try:os.fsync(fd)
     finally:os.close(fd)
     phase('committed')
 
 
-def run_batch(fixture,binary,directory,initialize=False,hook=None,offset=None,publication_fault=None,broken=False):
+def run_batch(fixture,binary,directory,initialize=False,hook=None,offset=None,publication_fault=None,broken=False,report=None):
+    if report is None:report={}
+    report['phase']='fixture-validate'
     validate_fixture(fixture)
     directory.mkdir(parents=True,exist_ok=True)
     checkpoint=directory/'checkpoint.json'
+    report['phase']='checkpoint-load'
     if initialize:
         require(not checkpoint.exists(),'checkpoint already exists')
         publish(directory,initial(fixture))
     else:require(checkpoint.is_file(),'restart checkpoint is missing')
-    state=json.loads(checkpoint.read_text());validate_state(state,fixture)
+    raw=checkpoint.read_text()
+    report['phase']='checkpoint-decode'
+    state=json.loads(raw)
+    report['phase']='checkpoint-validate'
+    validate_state(state,fixture)
     candidate=directory/'candidate.json'
     if candidate.exists():candidate.unlink()
     if broken and state['next']:
         # Deliberately broken recovery loses commit identity and reapplies a
         # committed prefix on already-updated balances; checks must reject it.
+        original=copy.deepcopy(state)
         state['next']-=1
         state['journal']=state['journal'][:-1]
         state['acceptedIds']=[]
+        report['mutation']=dict(name='replay-without-commit-identity',before=original,after=copy.deepcopy(state))
+    def injected_exit(name,index):
+        report.update(outcome='injected-interruption',hook=dict(name=name,offset=index))
+        (directory/'outcome.json').write_text(json.dumps(report,indent=2)+'\n')
+        os._exit(75)
     while state['next']<len(fixture['records']):
         index=state['next'];record=fixture['records'][index]
         evidence=dict(offset=index,phase='execute')
+        report.update(phase='execute',attempt=evidence)
         try:
             proposed=transition(binary,state,record,evidence)
+            report.update(phase='candidate-validate',candidate=proposed)
             validate_state(proposed,fixture)
             require(proposed['next']==index+1 and proposed['journal'][:-1]==state['journal'],'candidate progression')
             (directory/f'candidate-{index}.json').write_text(canonical(proposed)+'\n')
             (directory/'last-attempt.json').write_text(json.dumps(evidence,indent=2)+'\n')
             def phase(value):
                 evidence['phase']=value
+                report['phase']=value
                 (directory/'last-attempt.json').write_text(json.dumps(evidence,indent=2)+'\n')
             publish(directory,proposed,publication_fault if index==offset else None,
-                    (lambda:os._exit(75)) if hook=='before' and index==offset else None,phase)
+                    (lambda:injected_exit('before',index)) if hook=='before' and index==offset else None,phase)
             evidence['phase']='committed'
             (directory/f'committed-{index}.json').write_text(canonical(proposed)+'\n')
             (directory/'last-attempt.json').write_text(json.dumps(evidence,indent=2)+'\n')
-            if hook=='after' and index==offset:os._exit(75)
+            if hook=='after' and index==offset:injected_exit('after',index)
             state=proposed
         except Exception as error:
             evidence['error']=f'{type(error).__name__}: {error}'
@@ -266,9 +288,20 @@ if __name__=='__main__':
     parser.add_argument('--hook',choices=['before','after']);parser.add_argument('--offset',type=int)
     parser.add_argument('--publication-fault',choices=['write','dirsync']);parser.add_argument('--broken',action='store_true')
     args=parser.parse_args()
+    report=dict(schemaVersion=1,outcome='incomplete',phase='fixture-load')
+    exit_code=1
     try:
-        result=run_batch(json.loads(args.fixture.read_text()),args.binary,args.state,args.initialize,args.hook,args.offset,args.publication_fault,args.broken)
+        result=run_batch(json.loads(args.fixture.read_text()),args.binary,args.state,args.initialize,args.hook,args.offset,args.publication_fault,args.broken,report)
+        report.update(outcome='completed',phase='complete')
         print(canonical(result))
+        exit_code=0
     except Exception as error:
+        report['error']=dict(type=type(error).__name__,message=str(error))
         print(f'{type(error).__name__}: {error}',file=sys.stderr)
-        raise SystemExit(1)
+    try:
+        args.state.mkdir(parents=True,exist_ok=True)
+        (args.state/'outcome.json').write_text(json.dumps(report,indent=2)+'\n')
+    except Exception as error:
+        print(f'outcome retention failed: {error}',file=sys.stderr)
+        exit_code=1
+    raise SystemExit(exit_code)

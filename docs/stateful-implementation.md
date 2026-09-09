@@ -44,3 +44,13 @@ mutant is `failed`, with case/invocation and expected/actual evidence in
 `stateful/failing-cases.json`. Execution, storage, or protocol uncertainty remains
 `incomplete`. Negative tests inject a +1-cent stateful transition and a surviving
 recovery mutant; the behavioral mismatch bundle must replay as `failed`.
+
+Negative acceptance requires evidence of the intended cause, not merely a nonzero
+exit. Each fresh coordinator invocation writes `outcome.json`; the suite retains
+it with the raw invocation before another run can overwrite it. Recovery detection
+requires the actual before/after mutation, independently expected mutated candidate,
+clean transition completion, and the expected balance-chain validation rejection.
+Checkpoint, publication and process fault tests likewise match their exact phase,
+error and (where applicable) process observation. An unrelated failure makes the
+experiment incomplete. Regression fixtures inject unrelated I/O failures into all
+four negative-test families, including an incomplete recovery-experiment replay.

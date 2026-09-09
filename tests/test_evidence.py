@@ -232,6 +232,37 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(failure['actual'],0)
         self.assertEqual(failure['expected'],'nonzero exit')
 
+    def test_negative_experiment_infrastructure_is_incomplete(self):
+        for target in ['broken-restart','publication-write','checkpoint-cursor','process-nonzero']:
+            with self.subTest(target=target):
+                source=self.copy_source('negative-infrastructure-'+target)
+                path=source/'tools/stateful.py'
+                original=path.read_text()
+                if target=='broken-restart':
+                    changed=original.replace("if broken and state['next']:\n", "if broken and state['next']:\n        raise OSError('unavailable input')\n")
+                else:
+                    marker="    validate_fixture(fixture)\n    directory.mkdir"
+                    changed=original.replace(marker,
+                        f"    if directory.name.endswith({target!r}):raise OSError('unavailable input')\n"+marker)
+                self.assertNotEqual(original,changed)
+                path.write_text(changed)
+                out=self.work/('negative-infrastructure-evidence-'+target)
+                self.invoke(source/'run.sh','--output',out,expected=1)
+                results=[out]
+                if target=='broken-restart':
+                    replayed=self.work/'negative-infrastructure-replayed'
+                    self.invoke('python3',out/'replay.py','--output',replayed,expected=1)
+                    results.append(replayed)
+                for evidence in results:
+                    result=json.loads((evidence/'result.json').read_text())
+                    self.assertEqual(result['state'],'incomplete')
+                    self.assertIn('adverse execution unconfirmed',result['evaluation']['error'])
+                    invocation=json.loads((evidence/'stateful/invocations.json').read_text())[-1]
+                    self.assertNotIn('requiredMutantKilled',invocation)
+                    execution=invocation['observation']['execution']
+                    self.assertEqual(execution['error'],dict(type='OSError',message='unavailable input'))
+                    if target=='broken-restart':self.assertNotIn('mutation',execution)
+
     def test_surviving_required_mutant_fails(self):
         source=self.copy_source('survivor')
         path=source/'src/carddemo-interest.rs'

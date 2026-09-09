@@ -25,7 +25,11 @@ def suite(root,output,execute):
     def command(binary,case,extra=(),fixture_path=None):
         argv=[sys.executable,'-B',str(root/'tools/stateful.py'),'--fixture',str(fixture_path or root/'fixtures/stateful.json'),
               '--binary',str(binary),'--state',str(case),*extra]
+        outcome=case/'outcome.json'
+        if outcome.exists():outcome.unlink()
         observation=execute(argv,30)
+        try:observation['execution']=json.loads(outcome.read_text())
+        except (OSError,ValueError):observation['execution']=None
         results.append(dict(command=argv,observation=observation))
         (folder/'invocations.json').write_text(json.dumps(results,indent=2)+'\n')
         return observation
@@ -38,9 +42,25 @@ def suite(root,output,execute):
             raise StatefulFailure(str(reason))
     def equal(actual,expected,reason):
         require(actual==expected,reason,expected,actual)
+    def witnessed(condition,reason):
+        if not condition:raise RuntimeError('adverse execution unconfirmed: '+reason)
     def completed(observation,expected_exit=0):
         if observation['exit']!=expected_exit:
             raise RuntimeError('stateful execution incomplete: '+json.dumps(observation))
+        execution=observation.get('execution') or {}
+        witnessed(execution.get('schemaVersion')==1 and execution.get('outcome')==('completed' if expected_exit==0 else 'injected-interruption'),
+                  'completion/interruption protocol')
+        witnessed(not observation['stderr'],'unexpected coordinator diagnostic')
+    def rejected(observation,phase,error_type,message):
+        if observation['exit']==0:completed(observation)
+        require(observation['exit']!=0,'expected rejection reported success','nonzero exit',observation['exit'])
+        execution=observation.get('execution') or {}
+        error=execution.get('error') or {}
+        witnessed(observation['exit']==1 and not observation['stdout'] and execution.get('schemaVersion')==1 and execution.get('outcome')=='incomplete'
+                  and execution.get('phase')==phase and error.get('type')==error_type
+                  and (message is None or error.get('message')==message)
+                  and observation['stderr']==f"{error_type}: {error.get('message')}\n",'expected rejection cause')
+        return execution
     for language in ['cobol','rust']:
         binary=output/'build'/('stateful-'+language)
         case=folder/(language+'-normal')
@@ -54,6 +74,8 @@ def suite(root,output,execute):
                 case=folder/f'{language}-{hook}-{offset}'
                 observation=command(binary,case,['--initialize','--hook',hook,'--offset',str(offset)])
                 completed(observation,75)
+                witnessed(observation['execution'].get('hook')==dict(name=hook,offset=offset), 'interruption hook')
+                witnessed(observation['execution'].get('phase')==('before-rename' if hook=='before' else 'committed'), 'interruption phase')
                 committed=offset if hook=='before' else offset+1
                 equal(read(case),expected[committed],'interrupted durable state')
                 (case/'interrupted-state.json').write_text(canonical(read(case))+'\n')
@@ -64,13 +86,23 @@ def suite(root,output,execute):
         completed(command(binary,case,['--initialize','--hook','after','--offset','0']),75)
         before=read(case)
         broken=command(binary,case,['--broken'])
-        require(broken['exit']!=0,'broken restart survived','nonzero exit',broken['exit'])
+        if broken['exit']==0:
+            completed(broken)
+            require(False,'broken restart survived','nonzero exit',0)
+        execution=rejected(broken,'candidate-validate','ValueError','balance chain')
+        mutated=copy.deepcopy(before)
+        mutated['next']-=1;mutated['journal']=mutated['journal'][:-1];mutated['acceptedIds']=[]
+        witnessed(execution.get('mutation')==dict(name='replay-without-commit-identity',before=before,after=mutated),'recovery mutation did not execute')
+        witnessed(execution.get('candidate')==expected_step(mutated,fixture['records'][mutated['next']]),'mutated transition candidate')
+        attempt=execution.get('attempt') or {}
+        witnessed(attempt.get('observation',{}).get('exit')==0 and attempt.get('cleanupConfirmed') is True,'mutated transition completion/cleanup')
         equal(read(case),before,'broken restart published')
         results[-1]['requiredMutantKilled']=True
         for fault in ['write','dirsync']:
             case=folder/f'{language}-publication-{fault}'
             observation=command(binary,case,['--initialize','--publication-fault',fault,'--offset','0'])
-            require(observation['exit']!=0,'publication error reported success')
+            rejected(observation,'injected-write-failure' if fault=='write' else 'injected-directory-sync-failure',
+                     'OSError','injected pre-rename write failure' if fault=='write' else 'injected directory-fsync failure after rename')
             equal(read(case),expected[0 if fault=='write' else 1],'publication failure disk boundary')
             (case/'interrupted-state.json').write_text(canonical(read(case))+'\n')
             completed(command(binary,case))
@@ -85,7 +117,12 @@ def suite(root,output,execute):
             if fault=='changed-input':state['inputHash']='0'*64
             if fault!='missing':(case/'checkpoint.json').write_text('{' if fault=='malformed' else canonical(state))
             before=(case/'checkpoint.json').read_bytes() if (case/'checkpoint.json').exists() else None
-            require(command(binary,case)['exit']!=0,'bad checkpoint accepted')
+            phase='checkpoint-decode' if fault=='malformed' else 'checkpoint-load' if fault=='missing' else 'checkpoint-validate'
+            error_type='JSONDecodeError' if fault=='malformed' else 'ValueError'
+            message=dict(missing='restart checkpoint is missing',malformed=None,cursor='journal/cursor mismatch',
+                         ids='accepted IDs disagree with journal',balance='final balance chain',
+                         **{'changed-input':'changed input identity'})[fault]
+            rejected(command(binary,case),phase,error_type,message)
             after=(case/'checkpoint.json').read_bytes() if (case/'checkpoint.json').exists() else None
             equal(after.decode() if after else None,before.decode() if before else None,'bad checkpoint changed')
     # Adverse actual processes produce valid-looking output but must never publish
@@ -105,7 +142,16 @@ def suite(root,output,execute):
             if fault=='stderr':source+='sys.stderr.write("unexpected diagnostic")\n'
             if fault=='nonzero':source+='sys.exit(1)\n'
         wrong.write_text(source);wrong.chmod(0o755)
-        require(command(wrong,case)['exit']!=0,'bad process accepted')
+        observation=command(wrong,case)
+        execution=rejected(observation,'execute','RuntimeError' if fault=='timeout' else 'ValueError',
+                           'transition timeout' if fault=='timeout' else 'missing output terminator' if fault=='truncated' else 'transition process failed')
+        attempt=execution.get('attempt') or {}
+        expected_observation=dict(exit=-signal.SIGKILL if fault=='timeout' else 1 if fault=='nonzero' else 0,
+                                  stdout='' if fault=='timeout' else valid[:-4] if fault=='truncated' else valid,
+                                  stderr='unexpected diagnostic' if fault=='stderr' else '')
+        witnessed(attempt.get('observation')==expected_observation and attempt.get('cleanupConfirmed') is True,
+                  'adverse transition observation/cleanup')
+        witnessed(bool(attempt.get('timedOut'))==(fault=='timeout'),'transition timeout attribution')
         equal(read(case),expected[0],'bad process published candidate')
         if fault=='timeout':
             pid=int((case/'pid').read_text());stat=Path(f'/proc/{pid}/stat')
