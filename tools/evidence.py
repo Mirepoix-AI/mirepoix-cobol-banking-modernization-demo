@@ -13,6 +13,7 @@ import sys
 import tarfile
 import tempfile
 import time
+from processes import finish
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = ['run.sh','replay.py','README.md','PROVENANCE.md','LICENSE']
@@ -24,15 +25,9 @@ STOPPING = False
 def stop_active():
     global ACTIVE
     process = ACTIVE
-    if process is not None and process.poll() is None:
-        # Evaluator handles TERM by killing/reaping its independently grouped
-        # active command before writing its incomplete evaluation result.
-        os.killpg(process.pid, signal.SIGTERM)
-        try:
-            process.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.communicate()
+    if process is not None:
+        # Allow the evaluator's handler time to reap its separate command group.
+        finish(process,grace=2.0,timeout=3.0)
     ACTIVE = None
 
 
@@ -93,7 +88,7 @@ def run(output, source, identity, invocation, parent=None):
                 version=subprocess.Popen([resolved,*flags],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
                 ACTIVE=version
                 version_out,version_err=version.communicate(timeout=10)
-                ACTIVE=None
+                stop_active()
                 metadata['toolchains'][tool].update(exit=version.returncode,stdout=version_out,stderr=version_err)
         env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'}
         with (output/'harness.stdout').open('w') as stdout,(output/'harness.stderr').open('w') as stderr:
@@ -106,7 +101,7 @@ def run(output, source, identity, invocation, parent=None):
             except subprocess.TimeoutExpired:
                 stop_active()
                 raise RuntimeError('evaluator exceeded 300 seconds')
-        ACTIVE=None
+        stop_active()
         evaluation=json.loads((output/'evaluation.json').read_text())
         metadata.update(evaluation=evaluation)
         if process.returncode==0 and evaluation['state']=='verified':
@@ -117,7 +112,11 @@ def run(output, source, identity, invocation, parent=None):
         metadata['state']='incomplete'
         metadata['error']=f'{type(error).__name__}: {error}'
     finally:
-        stop_active()
+        try:
+            stop_active()
+        except Exception as error:
+            metadata['state']='incomplete'
+            metadata['cleanupError']=str(error)
     try:
         finalize(output,metadata,started)
     except InterruptedError as error:

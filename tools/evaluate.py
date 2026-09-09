@@ -8,15 +8,15 @@ import signal
 import subprocess
 import time
 from numeric import corpus, oracle, SEED, GENERATED
+from processes import finish
 
 MUTANTS = ['one_cent', 'rounding', 'sign', 'divisor', 'range']
 ACTIVE = None
 
 
 def interrupted(_signum, _frame):
-    if ACTIVE is not None and ACTIVE.poll() is None:
-        os.killpg(ACTIVE.pid, signal.SIGKILL)
-        ACTIVE.communicate()
+    if ACTIVE is not None:
+        finish(ACTIVE)
     raise RuntimeError('evaluation interrupted')
 
 signal.signal(signal.SIGTERM, interrupted)
@@ -30,9 +30,10 @@ def execute(argv, timeout=20):
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.communicate()
+        finish(process)
         raise RuntimeError(f'command timed out: {argv[0]}')
+    finish(process)
+    ACTIVE = None
     return dict(exit=process.returncode, stdout=stdout.decode(), stderr=stderr.decode())
 
 
