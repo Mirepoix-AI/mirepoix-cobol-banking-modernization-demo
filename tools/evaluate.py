@@ -43,7 +43,7 @@ def evaluate(root, output):
     (output/'cases.json').write_text(json.dumps(dict(seed=SEED, generated=GENERATED, cases=cases), indent=2)+'\n')
     commands = [['cobc','-x','-free','-Wall','-o',str(build/'cobol'),str(root/'src/carddemo-interest.cob')]]
     for variant in ['rust'] + MUTANTS:
-        command = ['rustc','--edition=2021','-D','warnings','-C','overflow-checks=yes']
+        command = ['rustc','--edition=2021','-D','warnings','-C','overflow-checks=yes','-C','strip=symbols']
         if variant != 'rust':
             command += ['--cfg','carddemo_mutation' if variant == 'one_cent' else 'mutation_'+variant]
         commands.append(command+['-o',str(build/variant),str(root/'src/carddemo-interest.rs')])
