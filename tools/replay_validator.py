@@ -5,6 +5,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+# Verification must not mutate the evidence by creating import bytecode.
+sys.dont_write_bytecode=True
 root=Path(__file__).resolve().parent
 sys.path.insert(0,str(root/'base/inputs'))
 from replay import verify
