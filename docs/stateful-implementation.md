@@ -38,3 +38,9 @@ escalation. Deliberately escaped daemons, power-loss durability, concurrent writ
 network filesystems, banking transaction semantics and whole-system equivalence
 remain outside this experiment. This tranche does not invoke Mirepoix's validator;
 that is the separately gated ME-26 integration.
+
+A witnessed full-state mismatch, changed checkpoint, or surviving required recovery
+mutant is `failed`, with case/invocation and expected/actual evidence in
+`stateful/failing-cases.json`. Execution, storage, or protocol uncertainty remains
+`incomplete`. Negative tests inject a +1-cent stateful transition and a surviving
+recovery mutant; the behavioral mismatch bundle must replay as `failed`.

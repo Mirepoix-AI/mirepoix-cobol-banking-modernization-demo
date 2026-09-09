@@ -10,6 +10,10 @@ import sys
 from stateful import initial,expected_step,validate_state,encode,canonical
 
 
+class StatefulFailure(AssertionError):
+    """A witnessed contract mismatch, distinct from an uncertain execution."""
+
+
 def suite(root,output,execute):
     fixture=json.loads((root/'fixtures/stateful.json').read_text())
     expected=[initial(fixture)]
@@ -26,40 +30,51 @@ def suite(root,output,execute):
         (folder/'invocations.json').write_text(json.dumps(results,indent=2)+'\n')
         return observation
     def read(case):return json.loads((case/'checkpoint.json').read_text())
-    def require(condition,reason):
-        if not condition:raise AssertionError(reason)
+    def require(condition,reason,expected=True,actual=False):
+        if not condition:
+            failure=dict(reason=reason,expected=expected,actual=actual,
+                         invocation=results[-1] if results else None)
+            (folder/'failing-cases.json').write_text(json.dumps([failure],indent=2)+'\n')
+            raise StatefulFailure(str(reason))
+    def equal(actual,expected,reason):
+        require(actual==expected,reason,expected,actual)
+    def completed(observation,expected_exit=0):
+        if observation['exit']!=expected_exit:
+            raise RuntimeError('stateful execution incomplete: '+json.dumps(observation))
     for language in ['cobol','rust']:
         binary=output/'build'/('stateful-'+language)
         case=folder/(language+'-normal')
         observation=command(binary,case,['--initialize'])
-        require(observation['exit']==0,(language,'normal',observation))
-        require(read(case)==expected[-1],'full final state')
+        completed(observation)
+        equal(read(case),expected[-1],'full final state')
         for index in range(len(fixture['records'])):
-            require(json.loads((case/f'committed-{index}.json').read_text())==expected[index+1],'intermediate state')
+            equal(json.loads((case/f'committed-{index}.json').read_text()),expected[index+1],'intermediate state')
         for hook in ['before','after']:
             for offset in range(len(fixture['records'])):
                 case=folder/f'{language}-{hook}-{offset}'
                 observation=command(binary,case,['--initialize','--hook',hook,'--offset',str(offset)])
-                require(observation['exit']==75,'injected interruption exit')
+                completed(observation,75)
                 committed=offset if hook=='before' else offset+1
-                require(read(case)==expected[committed],'interrupted durable state')
+                equal(read(case),expected[committed],'interrupted durable state')
                 (case/'interrupted-state.json').write_text(canonical(read(case))+'\n')
                 observation=command(binary,case)
-                require(observation['exit']==0 and read(case)==expected[-1],'restart full state')
+                completed(observation)
+                equal(read(case),expected[-1],'restart full state')
         case=folder/(language+'-broken-restart')
-        require(command(binary,case,['--initialize','--hook','after','--offset','0'])['exit']==75,'mutant setup')
+        completed(command(binary,case,['--initialize','--hook','after','--offset','0']),75)
         before=read(case)
         broken=command(binary,case,['--broken'])
-        require(broken['exit']!=0,'broken restart survived')
-        require(read(case)==before,'broken restart published')
+        require(broken['exit']!=0,'broken restart survived','nonzero exit',broken['exit'])
+        equal(read(case),before,'broken restart published')
         results[-1]['requiredMutantKilled']=True
         for fault in ['write','dirsync']:
             case=folder/f'{language}-publication-{fault}'
             observation=command(binary,case,['--initialize','--publication-fault',fault,'--offset','0'])
             require(observation['exit']!=0,'publication error reported success')
-            require(read(case)==expected[0 if fault=='write' else 1],'publication failure disk boundary')
+            equal(read(case),expected[0 if fault=='write' else 1],'publication failure disk boundary')
             (case/'interrupted-state.json').write_text(canonical(read(case))+'\n')
-            require(command(binary,case)['exit']==0 and read(case)==expected[-1],'publication recovery')
+            completed(command(binary,case))
+            equal(read(case),expected[-1],'publication recovery')
         for fault in ['missing','malformed','cursor','ids','balance','changed-input']:
             case=folder/f'{language}-checkpoint-{fault}'
             case.mkdir()
@@ -72,7 +87,7 @@ def suite(root,output,execute):
             before=(case/'checkpoint.json').read_bytes() if (case/'checkpoint.json').exists() else None
             require(command(binary,case)['exit']!=0,'bad checkpoint accepted')
             after=(case/'checkpoint.json').read_bytes() if (case/'checkpoint.json').exists() else None
-            require(before==after,'bad checkpoint changed')
+            equal(after.decode() if after else None,before.decode() if before else None,'bad checkpoint changed')
     # Adverse actual processes produce valid-looking output but must never publish
     # unless the process itself completed cleanly. Both language coordinators use
     # this common supervision boundary; each scenario starts from the same state.
@@ -91,7 +106,7 @@ def suite(root,output,execute):
             if fault=='nonzero':source+='sys.exit(1)\n'
         wrong.write_text(source);wrong.chmod(0o755)
         require(command(wrong,case)['exit']!=0,'bad process accepted')
-        require(read(case)==expected[0],'bad process published candidate')
+        equal(read(case),expected[0],'bad process published candidate')
         if fault=='timeout':
             pid=int((case/'pid').read_text());stat=Path(f'/proc/{pid}/stat')
             require(not stat.exists() or stat.read_text().split()[2]=='Z','timed-out process survives')

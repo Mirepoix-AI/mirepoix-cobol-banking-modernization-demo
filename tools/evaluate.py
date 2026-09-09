@@ -9,6 +9,7 @@ import subprocess
 import time
 from numeric import corpus, oracle, SEED, GENERATED
 from processes import finish
+from stateful_suite import StatefulFailure, suite
 
 MUTANTS = ['one_cent', 'rounding', 'sign', 'divisor', 'range']
 ACTIVE = None
@@ -96,9 +97,11 @@ if __name__ == '__main__':
     result = dict(state='incomplete', startedAt=time.time())
     try:
         result.update(evaluate(args.root,args.output))
-        from stateful_suite import suite
         result['stateful']=suite(args.root,args.output,execute)
         result['state']='verified' if result['baseline']=='EQUIVALENT' and not result['survived'] else 'failed'
+    except StatefulFailure as error:
+        result.update(state='failed',stateful=dict(state='failed',
+                      failureEvidence='stateful/failing-cases.json'),error=str(error))
     except Exception as error:
         result['error']=str(error)
     result['endedAt']=time.time()

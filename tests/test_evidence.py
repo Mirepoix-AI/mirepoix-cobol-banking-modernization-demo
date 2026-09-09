@@ -164,7 +164,7 @@ class EvidenceTests(unittest.TestCase):
                     'time.sleep(60)\n')
                 binary.chmod(0o755)
                 (source/'tools/stateful_suite.py').write_text(
-                    'import sys\n'
+                    'import sys\nclass StatefulFailure(AssertionError):pass\n'
                     'def suite(root,output,execute):\n'
                     '    return execute([sys.executable,str(root/"tools/stateful.py"),'
                     '"--fixture",str(root/"fixtures/stateful.json"),"--binary",'
@@ -196,6 +196,41 @@ class EvidenceTests(unittest.TestCase):
                     if child:
                         try:os.kill(child,signal.SIGKILL)
                         except ProcessLookupError:pass
+
+    def test_stateful_behavioral_mismatch_is_failed_and_replays_failed(self):
+        source=self.copy_source('stateful-behavioral-mismatch')
+        path=source/'src/stateful.rs'
+        original=path.read_text()
+        changed=original.replace('let delta=balance*rate/120000;', 'let delta=balance*rate/120000+1;')
+        self.assertNotEqual(original,changed)
+        path.write_text(changed)
+        out=self.work/'stateful-mismatch-evidence'
+        self.invoke(source/'run.sh','--output',out,expected=1)
+        for evidence in [out,self.work/'stateful-mismatch-replayed']:
+            if evidence!=out:self.invoke('python3',out/'replay.py','--output',evidence,expected=1)
+            result=json.loads((evidence/'result.json').read_text())
+            self.assertEqual(result['state'],'failed')
+            self.assertEqual(result['evaluation']['stateful']['state'],'failed')
+            failure=json.loads((evidence/'stateful/failing-cases.json').read_text())[0]
+            self.assertEqual(failure['invocation']['observation']['exit'],0)
+            self.assertNotEqual(failure['expected']['balances'],failure['actual']['balances'])
+            self.assertIn('journal',failure['actual'])
+
+    def test_surviving_restart_mutant_is_failed(self):
+        source=self.copy_source('restart-mutant-survivor')
+        path=source/'tools/stateful.py'
+        original=path.read_text()
+        changed=original.replace("if broken and state['next']:", 'if False:')
+        self.assertNotEqual(original,changed)
+        path.write_text(changed)
+        out=self.work/'restart-survivor-evidence'
+        self.invoke(source/'run.sh','--output',out,expected=1)
+        result=json.loads((out/'result.json').read_text())
+        self.assertEqual(result['state'],'failed')
+        failure=json.loads((out/'stateful/failing-cases.json').read_text())[0]
+        self.assertEqual(failure['reason'],'broken restart survived')
+        self.assertEqual(failure['actual'],0)
+        self.assertEqual(failure['expected'],'nonzero exit')
 
     def test_surviving_required_mutant_fails(self):
         source=self.copy_source('survivor')
