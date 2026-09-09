@@ -1,7 +1,7 @@
 # Mirepoix COBOL banking modernization demo
 
 > **Bounded public demonstration—not a production modernization capability,
-> proprietary banking-platform implementation, or validator integration.**
+> proprietary banking-platform implementation, or whole-system equivalence claim.**
 
 This repository demonstrates a bounded arithmetic claim and a synthetic restart experiment:
 
@@ -71,6 +71,14 @@ outside this source directory and must not be committed.
 `--mutation` remains a compatibility option; the full baseline and all required mutations still run. The command exits zero only when the baseline agrees with the independent oracle and every required mutant is detected.
 
 CI retains uniquely named evidence artifacts for 30 days, including failed/incomplete diagnostics when available. See [snapshot and replay instructions](docs/evidence-replay.md). The suite now uses 201 cases and five distinguishable mutations; see the [numeric contract and independent rational oracle](docs/numeric-contract.md).
+
+## Real Mirepoix validator integration
+
+The optional [local integration](docs/validator-integration.md) executes the recorded
+platform validator on the arithmetic and synthetic stateful inputs. It captures raw
+verdicts, deliberate differences, tool failures, mixed unresolved results and externally
+supervised cancellation. This is an explicit adapter demonstration, not autonomous
+translation or native COBOL project ingestion.
 
 ## Semantics
 
