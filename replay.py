@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 
-def verify(root):
+def verify_inventory(root):
     entries={}
     for line in (root/'SHA256SUMS').read_text().splitlines():
         digest,name=line.split('  ',1)
@@ -21,6 +21,11 @@ def verify(root):
     for name,digest in entries.items():
         if hashlib.sha256((root/name).read_bytes()).hexdigest()!=digest:
             raise ValueError('checksum mismatch: '+name)
+    return entries
+
+
+def verify(root):
+    entries=verify_inventory(root)
     for required in ['inputs/run.sh','inputs/tools/evidence.py','inputs/tools/evaluate.py','result.json','replay.py']:
         if required not in entries:
             raise ValueError('missing required input: '+required)
