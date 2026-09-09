@@ -12,20 +12,25 @@ jobs:
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       - name: Install GnuCOBOL
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends gnucobol
-
-      - name: Record compiler versions
-        run: |
-          cobc --version
-          rustc --version
-
-      - name: Verify equivalence and mutation detection
-        run: ./run.sh
+      - name: Capture and verify the snapshot
+        run: ./run.sh --output "$RUNNER_TEMP/carddemo-evidence"
+      - name: Replay and exercise adverse evidence paths
+        run: python3 -B -m unittest discover -s tests -v 2>&1 | tee "$RUNNER_TEMP/evidence-tests.log"
+      - name: Retain evidence, including failed or incomplete runs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: carddemo-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/carddemo-evidence.tar.gz
+            ${{ runner.temp }}/carddemo-evidence/result.json
+            ${{ runner.temp }}/evidence-tests.log
+          retention-days: 30
+          if-no-files-found: warn
