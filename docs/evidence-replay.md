@@ -15,7 +15,7 @@ states exit nonzero. Each case compares stdout, stderr and exit status. Diagnost
 full observations, generated corpus, failed cases and mutant-killing IDs are retained.
 Runs are bounded to 201 cases, 90 seconds per compilation, 3 seconds per case invocation
 and 300 seconds for the evaluator (up to five seconds of shutdown grace); CI has a 10-minute outer limit. Abrupt host loss or
-SIGKILL can prevent finalization; cooperative SIGTERM/SIGINT stops the evaluator and its active compiler/command before retaining an incomplete result; absent/partial evidence never establishes success.
+SIGKILL can prevent finalization; cooperative SIGTERM/SIGINT stops the evaluator and its active compiler/command before retaining an incomplete result; group cleanup includes children whose leader has already exited; absent/partial evidence never establishes success.
 
 `SHA256SUMS` covers every bundle file except itself, including binaries, outputs,
 result manifest and replay harness. The adjacent tar.gz is the artifact uploaded by
@@ -45,7 +45,7 @@ records the parent checksum-manifest hash. No original Git checkout is needed.
 Compiler paths and commands in the *new* bundle describe the replay environment;
 byte-identical executables or timing across machines are not promised.
 
-Prerequisites: Linux/POSIX, Python 3.10+, Bash, GnuCOBOL 3.1+, Rust 1.63+, GCC/linker
+Prerequisites: Linux with `/proc` available, Python 3.10+, Bash, GnuCOBOL 3.1+, Rust 1.63+, GCC/linker
 and their runtime/development libraries. CI uses Ubuntu 24.04; initial local execution
 used Debian 12 with GnuCOBOL 3.1.2 and Rust 1.63.0. No Python/Rust third-party libraries
 are used. Local compiler search paths can be configured normally but are not carried

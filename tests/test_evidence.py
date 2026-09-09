@@ -118,6 +118,37 @@ class EvidenceTests(unittest.TestCase):
                         try:os.killpg(child,signal.SIGKILL)
                         except ProcessLookupError:pass
 
+    def test_version_probe_cleans_child_after_leader_exit(self):
+        folder=self.work/'probe-orphan'
+        folder.mkdir()
+        compiler=folder/'cobc'
+        marker=folder/'child.pid'
+        compiler.write_text('#!/usr/bin/python3\nimport os,signal,time,pathlib\n'
+            'child=os.fork()\n'
+            'if child: os._exit(0)\n'
+            'signal.signal(signal.SIGTERM,signal.SIG_IGN)\n'
+            f'pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n'
+            'time.sleep(60)\n')
+        compiler.chmod(0o755)
+        out=folder/'evidence'
+        process=subprocess.Popen([str(ROOT/'run.sh'),'--output',str(out)],
+            env={**os.environ,'PATH':str(folder)+':'+os.environ['PATH']},
+            stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        child=None
+        try:
+            process.communicate(timeout=18)
+            self.assertNotEqual(process.returncode,0)
+            child=int(marker.read_text())
+            stat=Path(f'/proc/{child}/stat')
+            self.assertTrue(not stat.exists() or stat.read_text().split()[2]=='Z')
+            self.assertEqual(json.loads((out/'result.json').read_text())['state'],'incomplete')
+            self.assertTrue((out/'SHA256SUMS').exists())
+        finally:
+            if process.poll() is None:process.kill();process.wait()
+            if marker.exists():
+                try:os.kill(int(marker.read_text()),signal.SIGKILL)
+                except ProcessLookupError:pass
+
     def test_surviving_required_mutant_fails(self):
         source=self.copy_source('survivor')
         path=source/'src/carddemo-interest.rs'
