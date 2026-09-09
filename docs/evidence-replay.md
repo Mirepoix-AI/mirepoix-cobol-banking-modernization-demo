@@ -14,8 +14,8 @@ and `incomplete` (e.g. unavailable/failed compiler or harness failure). Both non
 states exit nonzero. Each case compares stdout, stderr and exit status. Diagnostics,
 full observations, generated corpus, failed cases and mutant-killing IDs are retained.
 Runs are bounded to 201 cases, 90 seconds per compilation, 3 seconds per case invocation
-and 300 seconds for the evaluator; CI has a 10-minute outer limit. Abrupt host loss or
-SIGKILL can prevent finalization; absent/partial evidence never establishes success.
+and 300 seconds for the evaluator (up to five seconds of shutdown grace); CI has a 10-minute outer limit. Abrupt host loss or
+SIGKILL can prevent finalization; cooperative SIGTERM/SIGINT stops the evaluator and its active compiler/command before retaining an incomplete result; absent/partial evidence never establishes success.
 
 `SHA256SUMS` covers every bundle file except itself, including binaries, outputs,
 result manifest and replay harness. The adjacent tar.gz is the artifact uploaded by

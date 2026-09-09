@@ -17,6 +17,36 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 FILES = ['run.sh','replay.py','README.md','PROVENANCE.md','LICENSE']
 DIRECTORIES = ['src','fixtures','tools','tests','docs','upstream','.github']
+ACTIVE = None
+STOPPING = False
+
+
+def stop_active():
+    global ACTIVE
+    process = ACTIVE
+    if process is not None and process.poll() is None:
+        # Evaluator handles TERM by killing/reaping its independently grouped
+        # active command before writing its incomplete evaluation result.
+        os.killpg(process.pid, signal.SIGTERM)
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
+    ACTIVE = None
+
+
+def interrupted(signum, _frame):
+    global STOPPING
+    if STOPPING:
+        return  # Finish cleanup/evidence despite a repeated cooperative signal.
+    STOPPING = True
+    stop_active()
+    raise InterruptedError(f'harness interrupted by {signal.Signals(signum).name}')
+
+
+signal.signal(signal.SIGTERM, interrupted)
+signal.signal(signal.SIGINT, interrupted)
 
 
 def digest(path):
@@ -43,6 +73,7 @@ def git_identity():
 
 
 def run(output, source, identity, invocation, parent=None):
+    global ACTIVE
     output=output.resolve()
     output.mkdir(parents=True,exist_ok=True)
     if any(output.iterdir()):
@@ -59,23 +90,23 @@ def run(output, source, identity, invocation, parent=None):
             resolved=shutil.which(tool)
             metadata['toolchains'][tool]=dict(path=resolved)
             if resolved:
-                version=subprocess.run([resolved,*flags],capture_output=True,text=True,timeout=10)
-                metadata['toolchains'][tool].update(exit=version.returncode,stdout=version.stdout,stderr=version.stderr)
+                version=subprocess.Popen([resolved,*flags],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
+                ACTIVE=version
+                version_out,version_err=version.communicate(timeout=10)
+                ACTIVE=None
+                metadata['toolchains'][tool].update(exit=version.returncode,stdout=version_out,stderr=version_err)
         env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'}
         with (output/'harness.stdout').open('w') as stdout,(output/'harness.stderr').open('w') as stderr:
             process=subprocess.Popen([sys.executable,str(output/'inputs/tools/evaluate.py'),
                                     '--root',str(output/'inputs'),'--output',str(output)],
                                    env=env,stdout=stdout,stderr=stderr,start_new_session=True)
+            ACTIVE=process
             try:
                 process.wait(timeout=300)
             except subprocess.TimeoutExpired:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid,signal.SIGKILL)
-                    process.wait()
+                stop_active()
                 raise RuntimeError('evaluator exceeded 300 seconds')
+        ACTIVE=None
         evaluation=json.loads((output/'evaluation.json').read_text())
         metadata.update(evaluation=evaluation)
         if process.returncode==0 and evaluation['state']=='verified':
@@ -83,15 +114,29 @@ def run(output, source, identity, invocation, parent=None):
         elif evaluation['state']=='failed':
             metadata['state']='failed'
     except Exception as error:
+        metadata['state']='incomplete'
         metadata['error']=f'{type(error).__name__}: {error}'
+    finally:
+        stop_active()
+    try:
+        finalize(output,metadata,started)
+    except InterruptedError as error:
+        # A first signal during hashing/archiving still gets an incomplete
+        # result and a fresh consistent manifest; further signals are deferred.
+        metadata['state']='incomplete'
+        metadata['error']=str(error)
+        finalize(output,metadata,started)
+    print(f"{metadata['state'].upper()} evidence={output} bundle={output}.tar.gz")
+    return 0 if metadata['state']=='verified' else 1
+
+
+def finalize(output, metadata, started):
     metadata.update(endedAt=time.time(),elapsedSeconds=time.time()-started)
     (output/'result.json').write_text(json.dumps(metadata,indent=2)+'\n')
-    paths=sorted(p for p in output.rglob('*') if p.is_file())
+    paths=sorted(p for p in output.rglob('*') if p.is_file() and p != output/'SHA256SUMS')
     (output/'SHA256SUMS').write_text(''.join(f'{digest(p)}  {p.relative_to(output).as_posix()}\n' for p in paths))
     with tarfile.open(str(output)+'.tar.gz','w:gz') as bundle:
         bundle.add(output,arcname=output.name)
-    print(f"{metadata['state'].upper()} evidence={output} bundle={output}.tar.gz")
-    return 0 if metadata['state']=='verified' else 1
 
 
 def main():

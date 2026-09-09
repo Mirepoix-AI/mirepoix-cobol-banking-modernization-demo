@@ -3,8 +3,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
+import time
 import subprocess
 import tempfile
+import sys
 import unittest
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -70,6 +73,50 @@ class EvidenceTests(unittest.TestCase):
         with (out/'inputs/src/carddemo-interest.rs').open('a') as stream:stream.write('\n// tampered\n')
         self.invoke('python3',out/'replay.py','--output',self.work/'must-not-exist',expected=2)
         self.assertFalse((self.work/'must-not-exist').exists())
+
+    def test_root_signals_stop_compiler_and_retain_incomplete(self):
+        for sig in [signal.SIGTERM,signal.SIGINT]:
+            with self.subTest(signal=sig.name):
+                folder=self.work/sig.name
+                folder.mkdir()
+                compiler=folder/'cobc'
+                marker=folder/'compiler.pid'
+                compiler.write_text('#!/usr/bin/python3\nimport os,sys,time,signal,pathlib\n'
+                    'if "-V" in sys.argv: print("slow fixture compiler");sys.exit(0)\n'
+                    'signal.signal(signal.SIGTERM,signal.SIG_IGN)\n'
+                    f'pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n'
+                    'time.sleep(60)\n')
+                compiler.chmod(0o755)
+                out=folder/'evidence'
+                process=subprocess.Popen([str(ROOT/'run.sh'),'--output',str(out)],
+                    env={**os.environ,'PATH':str(folder)+':'+os.environ['PATH']},
+                    stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+                child=None
+                try:
+                    for _ in range(200):
+                        if marker.exists():break
+                        time.sleep(.025)
+                    self.assertTrue(marker.exists(),'compiler did not start')
+                    child=int(marker.read_text())
+                    evaluator=int(Path(f'/proc/{child}/stat').read_text().split()[3])
+                    process.send_signal(sig)
+                    process.communicate(timeout=10)
+                    self.assertNotEqual(process.returncode,0)
+                    for pid in [child,evaluator]:
+                        stat=Path(f'/proc/{pid}/stat')
+                        self.assertTrue(not stat.exists() or stat.read_text().split()[2]=='Z')
+                    result=json.loads((out/'result.json').read_text())
+                    self.assertEqual(result['state'],'incomplete')
+                    self.assertIn(sig.name,result['error'])
+                    self.assertTrue(Path(str(out)+'.tar.gz').exists())
+                    sys.path.insert(0,str(ROOT))
+                    from replay import verify
+                    verify(out)
+                finally:
+                    if process.poll() is None:process.kill();process.wait()
+                    if child:
+                        try:os.killpg(child,signal.SIGKILL)
+                        except ProcessLookupError:pass
 
     def test_surviving_required_mutant_fails(self):
         source=self.copy_source('survivor')
