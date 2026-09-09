@@ -6,7 +6,7 @@
 use std::env;
 use std::process::ExitCode;
 
-const MONTHLY_DIVISOR: i128 = 120_000;
+const MONTHLY_DIVISOR: i128 = if cfg!(mutation_divisor) { 10_000 } else { 120_000 };
 const MAX_OUTPUT_CENTS: i128 = 99_999_999_999;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -82,7 +82,11 @@ fn calculate(balance: &str, rate: &str) -> Result<i128, InputError> {
     // Signed integer division truncates toward zero, matching COBOL assignment
     // to PIC S9(09)V99 without a ROUNDED phrase.
     let monthly_cents = product / MONTHLY_DIVISOR;
-    if monthly_cents.abs() > MAX_OUTPUT_CENTS {
+    #[cfg(mutation_rounding)]
+    let monthly_cents = monthly_cents + if (product % MONTHLY_DIVISOR).abs() * 2 >= MONTHLY_DIVISOR { product.signum() } else { 0 };
+    #[cfg(mutation_sign)]
+    let monthly_cents = monthly_cents.abs();
+    if !cfg!(mutation_range) && monthly_cents.abs() > MAX_OUTPUT_CENTS {
         return Err(InputError::Overflow);
     }
 

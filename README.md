@@ -6,7 +6,7 @@
 This repository demonstrates one auditable claim:
 
 > For the pinned Apache-2.0 AWS CardDemo monthly-interest rule and the committed
-> fixture set, a portable GnuCOBOL oracle and a dependency-free Rust
+> and seeded fixture set, a portable GnuCOBOL adapter and a dependency-free Rust
 > implementation produce the same canonical outputs.
 
 The harness also compiles a deliberately incorrect Rust variant and requires the
@@ -53,21 +53,20 @@ Retain the evidence at an explicit, empty directory:
 Expected terminal verdicts:
 
 ```text
-EQUIVALENT baseline ...
-DIVERGENT controlled-mutation ...
+VERIFIED evidence=... bundle=...
 ```
 
 The GitHub Actions workflow in `.github/workflows/equivalence.yml` runs the same
 check for every push and pull request.
 
-`result.json` is the machine-readable verdict. `SHA256SUMS` covers inputs,
+`result.json` is the machine-readable verdict (`verified`, `failed` or `incomplete`). `SHA256SUMS` covers inputs,
 compiler versions, binaries, execution tables, and the result. The adjacent
 `.tar.gz` is the portable evidence bundle. Generated evidence and binaries belong
 outside this source directory and must not be committed.
 
-`--mutation` selects mutation-focused terminal output. The evidence still evaluates
-the baseline, and the command exits zero only when the baseline is `EQUIVALENT` and
-the machine-readable mutation verdict is `DIVERGENT`.
+`--mutation` remains a compatibility option; the full baseline and all required mutations still run. The command exits zero only when the baseline agrees with the independent oracle and every required mutant is detected.
+
+CI retains uniquely named evidence artifacts for 30 days, including failed/incomplete diagnostics when available. See [snapshot and replay instructions](docs/evidence-replay.md). The suite now uses 201 cases and five distinguishable mutations; see the [numeric contract and independent rational oracle](docs/numeric-contract.md).
 
 ## Semantics
 
