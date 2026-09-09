@@ -3,14 +3,18 @@
 > **Bounded public demonstration—not a production modernization capability,
 > proprietary banking-platform implementation, or validator integration.**
 
-This repository demonstrates one auditable claim:
+This repository demonstrates a bounded arithmetic claim and a synthetic restart experiment:
 
 > For the pinned Apache-2.0 AWS CardDemo monthly-interest rule and the committed
 > and seeded fixture set, a portable GnuCOBOL adapter and a dependency-free Rust
 > implementation produce the same canonical outputs.
 
-The harness also compiles a deliberately incorrect Rust variant and requires the
-comparison to report `DIVERGENT`. This proves that the demonstration can detect a
+Separate COBOL and Rust programs also apply that rule in a synthetic account batch.
+Complete balances, journals and restart states are checked against an independent
+exact-arithmetic oracle; see [stateful implementation and evidence](docs/stateful-implementation.md).
+
+The harness compiles five deliberately incorrect Rust variants and requires each
+to disagree with the numeric oracle. This proves that the demonstration can detect a
 controlled semantic mutation instead of merely producing a green result.
 
 ## Why this example exists
@@ -105,7 +109,7 @@ Mirepoix-authored material is available under the Business Source License 1.1 in
 [`LICENSE`](LICENSE). The identified AWS-derived material remains under Apache-2.0.
 Commercial licensing is available from `licensing@mirepoix-ai.com`.
 
-A green result proves only the extracted monthly-interest rule for the committed
-fixture set. It does **not** prove full CardDemo, IBM z/OS, CICS, VSAM, JCL,
+A green result establishes agreement for the extracted rule and the documented
+synthetic batch/restart fixtures. It does **not** prove full CardDemo, IBM z/OS, CICS, VSAM, JCL,
 assembler, or whole-system equivalence. It does not advertise native production
 COBOL modernization support.

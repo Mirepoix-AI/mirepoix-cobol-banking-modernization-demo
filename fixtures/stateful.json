@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "accounts": [
+    {"id":"A","balance":"100.00"},
+    {"id":"B","balance":"999999999.99"},
+    {"id":"C","balance":"-100.00"}
+  ],
+  "records": [
+    {"id":"r1","account":"A","rate":"12.00"},
+    {"id":"r1","account":"UNKNOWN","rate":"abc"},
+    {"id":"r2","account":"UNKNOWN","rate":"abc"},
+    {"id":"r2","account":"A","rate":"abc"},
+    {"id":"r2","account":"A","rate":"0.00"},
+    {"id":"r3","account":"B","rate":"9999.99"},
+    {"id":"r4","account":"B","rate":"12.00"},
+    {"id":"r5","account":"C","rate":"12.00"},
+    {"id":"r6","account":"C","rate":"-12.00"},
+    {"id":"r7","account":"A","rate":"xxxxx.00"},
+    {"id":"r8","account":"A","rate":"|"},
+    {"id":"r9","account":"A","rate":" 1.00 "}
+  ]
+}

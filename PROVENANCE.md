@@ -27,3 +27,11 @@ COMPUTE WS-MONTHLY-INT
 No `ROUNDED` phrase is present. The adapter makes the resulting truncation to two fractional decimal places explicit and adds portable input/output/error framing solely for deterministic comparison.
 
 This prototype does not copy, execute, or claim equivalence for CardDemo's CICS, VSAM, JCL, Db2, IMS, MQ, assembler, full batch flow, or whole application.
+
+## Synthetic stateful extension (ME-25)
+
+`src/stateful.cob` repeats the pinned monthly-interest arithmetic expression under
+the AWS-derived expression's Apache-2.0 attribution above. Its surrounding account,
+journal and checkpoint framing, `src/stateful.rs`, and the Python state coordinator
+and oracle are Mirepoix-authored demonstration code. The batch fixture is synthetic;
+it is not an extraction of CardDemo file layouts or transaction/restart behavior.

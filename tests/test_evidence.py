@@ -149,6 +149,54 @@ class EvidenceTests(unittest.TestCase):
                 try:os.kill(int(marker.read_text()),signal.SIGKILL)
                 except ProcessLookupError:pass
 
+    def test_root_signals_stop_nested_stateful_transition(self):
+        for sig in [signal.SIGTERM,signal.SIGINT]:
+            with self.subTest(signal=sig.name):
+                source=self.copy_source('stateful-'+sig.name)
+                folder=self.work/('nested-'+sig.name);folder.mkdir()
+                marker=folder/'child.pid'
+                binary=folder/'transition'
+                binary.write_text('#!/usr/bin/python3\nimport os,signal,time,pathlib\n'
+                    'child=os.fork()\n'
+                    'if child: os._exit(0)\n'
+                    'signal.signal(signal.SIGTERM,signal.SIG_IGN)\n'
+                    f'pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n'
+                    'time.sleep(60)\n')
+                binary.chmod(0o755)
+                (source/'tools/stateful_suite.py').write_text(
+                    'import sys\n'
+                    'def suite(root,output,execute):\n'
+                    '    return execute([sys.executable,str(root/"tools/stateful.py"),'
+                    '"--fixture",str(root/"fixtures/stateful.json"),"--binary",'
+                    +repr(str(binary))+',"--state",str(output/"stateful"),"--initialize"],30)\n')
+                out=folder/'evidence'
+                process=subprocess.Popen([str(source/'run.sh'),'--output',str(out)],
+                    stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+                child=None
+                try:
+                    deadline=time.monotonic()+30
+                    while not marker.exists() and time.monotonic()<deadline:time.sleep(.025)
+                    self.assertTrue(marker.exists(),'transition did not start')
+                    child=int(marker.read_text())
+                    process.send_signal(sig)
+                    process.communicate(timeout=10)
+                    self.assertNotEqual(process.returncode,0)
+                    stat=Path(f'/proc/{child}/stat')
+                    self.assertTrue(not stat.exists() or stat.read_text().split()[2]=='Z','nested child survives')
+                    result=json.loads((out/'result.json').read_text())
+                    self.assertEqual(result['state'],'incomplete')
+                    sys.path.insert(0,str(ROOT))
+                    from replay import verify
+                    verify(out)
+                    checkpoint=json.loads((out/'stateful/checkpoint.json').read_text())
+                    self.assertEqual(checkpoint['next'],0)
+                    self.assertEqual(checkpoint['journal'],[])
+                finally:
+                    if process.poll() is None:process.kill();process.wait()
+                    if child:
+                        try:os.kill(child,signal.SIGKILL)
+                        except ProcessLookupError:pass
+
     def test_surviving_required_mutant_fails(self):
         source=self.copy_source('survivor')
         path=source/'src/carddemo-interest.rs'
