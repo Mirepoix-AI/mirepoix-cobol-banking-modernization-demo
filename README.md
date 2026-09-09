@@ -27,7 +27,7 @@ rule.
 The workflow illustrates a safer modernization pattern:
 
 1. isolate a bounded legacy behavior;
-2. retain the legacy implementation as an executable oracle;
+2. retain an executable legacy baseline and define an independent acceptance oracle;
 3. implement the behavior in a target language;
 4. exercise decimal, error, and representability boundaries;
 5. inject a known defect to test the comparison; and
@@ -79,6 +79,9 @@ platform validator on the arithmetic and synthetic stateful inputs. It captures 
 verdicts, deliberate differences, tool failures, mixed unresolved results and externally
 supervised cancellation. This is an explicit adapter demonstration, not autonomous
 translation or native COBOL project ingestion.
+
+The [capability and measurement report](docs/capability-report.md) records reviewed
+source identities, executed coverage, timing samples and remaining limits.
 
 ## Semantics
 
